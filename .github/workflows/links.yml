@@ -35,9 +35,10 @@ on:
         required: false
         default: false
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
+
+# NOTE: no top-level `concurrency:` block here deliberately — see astro-ci.yml
+# for why (github.workflow resolves to the CALLER's name inside a called
+# workflow_call workflow, causing a self-deadlock if both declare one).
 
 jobs:
   lychee:

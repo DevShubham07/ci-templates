@@ -21,9 +21,12 @@ on:
         required: false
         default: "v1"
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
+
+# NOTE: no top-level `concurrency:` block here deliberately. Inside a called
+# (workflow_call) workflow, `github.workflow` resolves to the CALLER's name,
+# so a concurrency group defined here would collide with the caller's own
+# group and GitHub cancels the run to break the resulting deadlock. Callers
+# (e.g. site-template/.github/workflows/ci.yml) own concurrency control.
 
 jobs:
   build-test-perf:
