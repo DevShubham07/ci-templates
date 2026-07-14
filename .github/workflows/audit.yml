@@ -1,0 +1,106 @@
+name: audit
+
+# Weekly scheduled workflow SKELETON — design doc §4.5 / §8 P10 / §11.3.
+# Checks out factory-core, runs the PSI fleet audit + fleet status scripts, and
+# posts results as a GitHub issue. This is a SKELETON: several values are
+# org/fleet-specific and marked TODO below — fill in before relying on this in prod.
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    # Weekly, Monday 06:00 UTC — design doc §4.5 ("audit.yml — weekly cron").
+    # TODO: confirm this cron matches the operator's intended local audit window
+    # (06:00 UTC; adjust if a specific IST/local time is required).
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-audit
+  cancel-in-progress: false
+
+jobs:
+  fleet-audit:
+    runs-on: ubuntu-latest
+    # TODO: this workflow currently lives in ci-templates as a skeleton. Decide
+    # whether it should instead be committed directly into factory-core (it already
+    # checks that repo out below) rather than called via workflow_call/reusable-tag,
+    # since it has no workflow_call inputs (design doc doesn't specify one for audit.yml).
+    steps:
+      - name: Checkout factory-core
+        uses: actions/checkout@v6
+        with:
+          # TODO: replace with the real factory-core repo once the org is finalized
+          # (design doc uses the `ORG` placeholder throughout, e.g. §4.2/§4.4).
+          repository: ORG/factory-core
+          ref: main
+          path: factory-core
+          # TODO: if factory-core is public this token is unnecessary; if it becomes
+          # private, provide a PAT/deploy key with read access via secrets.
+          token: ${{ secrets.FACTORY_CORE_CHECKOUT_TOKEN }}
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: factory-core/pnpm-lock.yaml
+
+      - name: Install factory-core dependencies
+        working-directory: factory-core
+        run: pnpm install --frozen-lockfile
+
+      # design doc §3.3/§8 P10/§11.3: PSI per live site + GSC sitemap status,
+      # aggregated into the weekly audit report.
+      - name: Run PSI audit (all fleet sites)
+        working-directory: factory-core
+        env:
+          # TODO: PSI_API_KEY must be provisioned as an org/repo secret [HUMAN] —
+          # not covered by the design doc's §4.7 secrets matrix, which lists
+          # NPM_TOKEN/VERCEL_TOKEN/GSC SA/INDEXNOW_KEY/Sentry DSN but not a PSI key.
+          # Confirm the correct secret name and quota (PSI: 25k queries/day, §11.1)
+          # before enabling this on a real schedule.
+          PSI_API_KEY: ${{ secrets.PSI_API_KEY }}
+        run: node automation/psi-audit.mjs --all --key "$PSI_API_KEY"
+
+      - name: Run fleet status check
+        working-directory: factory-core
+        run: node automation/fleet-status.mjs
+
+      # TODO: psi-audit.mjs / fleet-status.mjs output contracts (file paths, JSON
+      # shape) aren't specified beyond "report → issue" (§4.5) and the recurring
+      # audit content list (§11.3). Wire the real output file path(s) here once
+      # those scripts define one (see automation/ header-contract convention, §8 P0).
+      - name: Assemble audit report
+        working-directory: factory-core
+        run: |
+          {
+            echo "# Weekly fleet audit — $(date -u +%Y-%m-%d)"
+            echo
+            echo "## PSI audit"
+            echo '```'
+            cat automation/out/psi-audit-report.md 2>/dev/null || echo "TODO: psi-audit.mjs report path not finalized"
+            echo '```'
+            echo
+            echo "## Fleet status"
+            echo '```'
+            cat automation/out/fleet-status-report.md 2>/dev/null || echo "TODO: fleet-status.mjs report path not finalized"
+            echo '```'
+          } > audit-report.md
+
+      # design doc §11.2: "lychee/audit failures ⇒ GitHub issues labeled fleet-alert."
+      # This step files the audit as an informational issue every run; TODO: decide
+      # whether to only file on drift/failure (per §11.2) vs. always post a weekly
+      # summary issue (per §11.2's "Weekly summary issue in factory-core aggregates
+      # everything") — the doc implies the latter for P-11 output, so defaulting to
+      # always-post here.
+      - name: Post audit report as GitHub issue
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: "Weekly fleet audit — ${{ github.run_id }}"
+          content-filepath: factory-core/audit-report.md
+          # TODO: confirm final label taxonomy; using fleet-alert per §11.2 pending
+          # a dedicated "audit" label if the operator wants weekly summaries separated
+          # from failure alerts.
+          labels: fleet-alert

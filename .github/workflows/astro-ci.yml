@@ -1,0 +1,115 @@
+name: astro-ci
+
+# Reusable workflow — design doc §4.5.
+# Callers: `uses: ORG/ci-templates/.github/workflows/astro-ci.yml@v1` (see ci-templates/README.md).
+
+on:
+  workflow_call:
+    inputs:
+      # ASSUMPTION: the org name is not fixed anywhere in the design doc (it uses the
+      # `ORG` placeholder throughout, e.g. §4.4/§4.5). This input lets us fetch the
+      # shared lighthouserc.json fallback (spec item B) from this same ci-templates
+      # repo without hardcoding an org. Callers on org `ORG` never need to override it.
+      ci-templates-repo:
+        description: "owner/repo of ci-templates, for fetching the shared lighthouserc.json fallback"
+        type: string
+        required: false
+        default: "ORG/ci-templates"
+      ci-templates-ref:
+        description: "ref/tag of ci-templates to pull the shared lighthouserc.json from"
+        type: string
+        required: false
+        default: "v1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-perf:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout site repo
+        uses: actions/checkout@v6
+
+      # pnpm setup MUST precede setup-node — the node cache: 'pnpm' option below
+      # depends on the pnpm binary already being on PATH (design doc §4.5).
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (capture log for sitemap-skip check)
+        run: |
+          set -o pipefail
+          pnpm build 2>&1 | tee build.log
+
+      - name: "Fail if sitemap integration skipped (site: not set — §5)"
+        run: |
+          if grep -q "Skipping" build.log; then
+            echo "::error::@astrojs/sitemap logged a 'Skipping' warning — astro.config.mjs is missing/misconfigured 'site:'. No sitemap was emitted even though the build passed (design doc §5/G0/G6)."
+            exit 1
+          fi
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        run: pnpm test
+
+      # --- Lighthouse CI (LHCI) ---
+      # Design doc §4.5/§5 pins the underlying tool to @lhci/cli 0.15 (also namable
+      # via treosh/lighthouse-ci-action@v12); this workflow installs the CLI directly
+      # per explicit task instructions so lhci autorun can be invoked against the
+      # repo's own lighthouserc.json when present.
+      - name: Install LHCI CLI
+        run: npm i -g @lhci/cli@0.15.x
+
+      - name: Checkout shared lighthouserc.json fallback
+        if: hashFiles('lighthouserc.json') == ''
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ inputs.ci-templates-repo }}
+          ref: ${{ inputs.ci-templates-ref }}
+          path: .ci-templates-shared
+          sparse-checkout: |
+            lighthouserc.json
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve LHCI config path
+        id: lhci-config
+        run: |
+          if [ -f "lighthouserc.json" ]; then
+            echo "path=lighthouserc.json" >> "$GITHUB_OUTPUT"
+          else
+            echo "path=.ci-templates-shared/lighthouserc.json" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run LHCI against astro preview
+        run: lhci autorun --config="${{ steps.lhci-config.outputs.path }}"
+
+      # ASSUMPTION: actions/upload-artifact version is not pinned anywhere in the
+      # design doc (§5's pin table only covers the site's own stack). v4 is used as
+      # the current stable major; Renovate (design doc §5/§9) maintains it thereafter.
+      - name: Upload Playwright report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+
+      - name: Upload LHCI results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: lighthouseci
+          path: .lighthouseci/
+          retention-days: 14

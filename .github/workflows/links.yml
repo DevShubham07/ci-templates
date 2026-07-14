@@ -1,0 +1,84 @@
+name: links
+
+# Reusable workflow — design doc §4.5 ("links.yml — daily cron: lycheeverse/lychee-action@v2
+# against live URLs from portfolio.json; failures ⇒ GitHub issue").
+#
+# This file only defines the reusable job (workflow_call). The daily-cron trigger
+# lives in each caller (or in a small dispatcher workflow in factory-core that loops
+# `portfolio.json` and calls this per site / in one batched run) — see
+# ci-templates/README.md for the calling convention.
+#
+# Example caller (schedule-friendly):
+#
+#   on:
+#     schedule:
+#       - cron: '0 5 * * *'   # daily; adjust per fleet size / 20-concurrent-job limit (§4.5)
+#     workflow_dispatch: {}
+#
+#   jobs:
+#     check-links:
+#       uses: ORG/ci-templates/.github/workflows/links.yml@v1
+#       with:
+#         urls: "https://example.com/ https://example.com/some-page/"
+#       secrets: inherit
+
+on:
+  workflow_call:
+    inputs:
+      urls:
+        description: "Space- or newline-separated list of live URLs to check (typically sourced from factory-core/registry/portfolio.json)"
+        type: string
+        required: true
+      fail-fast:
+        description: "Pass through to lychee --no-progress; keep false for full-report runs"
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  lychee:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Write URL list
+        run: |
+          printf '%s\n' ${{ inputs.urls }} > urls.txt
+          cat urls.txt
+
+      # ASSUMPTION: lychee-action's specific `args`/`fail` input shape is not specified
+      # in the design doc (only the action tag lycheeverse/lychee-action@v2 and the
+      # daily-cron/GitHub-issue-on-failure behavior are, §4.5/§11.2). `fail: true`
+      # makes the step's outcome reflect broken-link findings so `failure()` below fires.
+      - name: Link check
+        id: lychee
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --no-progress
+            --format markdown
+            --output lychee-report.md
+            urls.txt
+          fail: true
+
+      - name: Upload lychee report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: lychee-report
+          path: lychee-report.md
+          retention-days: 14
+
+      # Design doc §4.5/§11.2: failures ⇒ GitHub issue labeled `fleet-alert`.
+      - name: Create issue on failure
+        if: ${{ failure() }}
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: "Broken links detected (${{ github.run_id }})"
+          content-filepath: lychee-report.md
+          labels: fleet-alert
