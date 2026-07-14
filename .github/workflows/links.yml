@@ -17,7 +17,7 @@ name: links
 #
 #   jobs:
 #     check-links:
-#       uses: ORG/ci-templates/.github/workflows/links.yml@v1
+#       uses: DevShubham07/ci-templates/.github/workflows/links.yml@v1
 #       with:
 #         urls: "https://example.com/ https://example.com/some-page/"
 #       secrets: inherit

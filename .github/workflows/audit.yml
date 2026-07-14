@@ -30,7 +30,7 @@ jobs:
         with:
           # TODO: replace with the real factory-core repo once the org is finalized
           # (design doc uses the `ORG` placeholder throughout, e.g. §4.2/§4.4).
-          repository: ORG/factory-core
+          repository: DevShubham07/factory-core
           ref: main
           path: factory-core
           # TODO: if factory-core is public this token is unnecessary; if it becomes

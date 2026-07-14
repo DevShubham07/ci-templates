@@ -12,7 +12,7 @@ name: ci
 on: [push, pull_request]
 jobs:
   build-test-perf:
-    uses: ORG/ci-templates/.github/workflows/astro-ci.yml@v1
+    uses: DevShubham07/ci-templates/.github/workflows/astro-ci.yml@v1
     secrets: inherit
 ```
 

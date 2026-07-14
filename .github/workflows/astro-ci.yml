@@ -1,7 +1,7 @@
 name: astro-ci
 
 # Reusable workflow — design doc §4.5.
-# Callers: `uses: ORG/ci-templates/.github/workflows/astro-ci.yml@v1` (see ci-templates/README.md).
+# Callers: `uses: DevShubham07/ci-templates/.github/workflows/astro-ci.yml@v1` (see ci-templates/README.md).
 
 on:
   workflow_call:
@@ -14,7 +14,7 @@ on:
         description: "owner/repo of ci-templates, for fetching the shared lighthouserc.json fallback"
         type: string
         required: false
-        default: "ORG/ci-templates"
+        default: "DevShubham07/ci-templates"
       ci-templates-ref:
         description: "ref/tag of ci-templates to pull the shared lighthouserc.json from"
         type: string
