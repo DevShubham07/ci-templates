@@ -37,8 +37,17 @@ jobs:
 
       # pnpm setup MUST precede setup-node — the node cache: 'pnpm' option below
       # depends on the pnpm binary already being on PATH (design doc §4.5).
+      #
+      # NOTE: version is passed explicitly (major-only, "10") rather than via a
+      # package.json "packageManager" field. When action-setup detects that
+      # field it delegates to pnpm's own `self-update`/switch-version path,
+      # which hit a real bug in a fresh 11.x patch release ("Cannot use 'in'
+      # operator to search for 'integrity' in undefined") during bootstrap.
+      # Passing `version:` directly uses the action's own installer instead.
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
+        with:
+          version: 10
 
       - name: Setup Node
         uses: actions/setup-node@v6
